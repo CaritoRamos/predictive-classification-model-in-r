@@ -1,0 +1,1069 @@
+---
+title: "MODELO PREDICTIVO DE CLASIFICACIÓN: CANCELACION DE RESERVAS DE HOTEL"
+author: "Carito Ramos"
+date: "2024-09-30"
+output:
+  html_document:
+    toc: true        
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. INTRODUCCION
+
+En la era digital, los canales de reserva hotelera en línea han transformado drásticamente las posibilidades de reserva y el comportamiento de los clientes.
+Sin embargo, este cambio ha traído consigo un reto importante para los hoteles: un número significativo de reservas se cancela o no se cumple, conocido como "no-show".
+Las cancelaciones suelen deberse a cambios de planes, conflictos de programación, entre otros factores.
+Estas cancelaciones se ven facilitadas por la opción de hacerlo sin costo o a un precio bajo, lo cual beneficia a los clientes, pero puede ser perjudicial para los hoteles, afectando sus ingresos.
+
+La data utilizada para el presente trabajo se obtuvo del siguiente sitio Kaggle: <https://www.kaggle.com/code/ilyai332/eda-visualization-correlations-prediction/input>
+
+y contiene información detallada de las reservas de clientes, incluyendo el número de adultos y niños, duración de la estancia, tipo de habitación, solicitudes especiales y más.
+Con esta información, el objetivo es predecir si un cliente honrará su reserva o la cancelará, permitiendo a los hoteles gestionar mejor su capacidad y reducir el impacto financiero de las cancelaciones.
+
+### 1.1. DICCIONARIO DE DATOS:
+
+| [Variable Original]{.underline}      | [Variable Renombrada]{.underline} |                                                                               |
+|------------------|------------------|------------------------------------|
+| Booking_ID                           | *Deleted*                         | Identificador único de cada reserva.                                          |
+| no_of_adults                         | adults                            | Número de adultos en la reserva.                                              |
+| no_of_children                       | children                          | Número de niños en la reserva.                                                |
+| no_of_weekend_nights                 | weekend_nights                    | Número de noches de fin de semana (sábado o domingo) reservadas.              |
+| no_of_week_nights                    | weekday_nights                    | Número de noches entre semana (lunes a viernes) reservadas.                   |
+| type_of_meal_plan                    | meal_plan                         | Tipo de plan de comidas reservado.                                            |
+| required_car_parking_space           | car_parking_required              | Indica si el cliente requiere un espacio de estacionamiento (0 - No, 1 - Sí). |
+| room_type_reserved                   | room_type                         | Tipo de habitación reservada (codificado por INN Hotels).                     |
+| lead_time                            |                                   | Número de días entre la reserva y la llegada.                                 |
+| arrival_year                         |                                   | Año de la fecha de llegada.                                                   |
+| arrival_month                        | high_season                       | Mes de la fecha de llegada.                                                   |
+| arrival_date                         |                                   | Día de la fecha de llegada.                                                   |
+| market_segment_type                  | segment                           | Segmento de mercado de la reserva.                                            |
+| repeated_guest                       |                                   | Indica si el cliente es recurrente (0 - No, 1 - Sí).                          |
+| no_of_previous_cancellations         | previous_cancellations            | Número de cancelaciones anteriores realizadas por el cliente.                 |
+| no_of_previous_bookings_not_canceled | bookings_not_canceled             | Número de reservas anteriores no canceladas.                                  |
+| avg_price_per_room                   | avg_price                         | Precio promedio por día de la reserva (en euros).                             |
+| no_of_special_requests               | special_requests                  | Número de solicitudes especiales realizadas por el cliente.                   |
+| booking_status                       | target                            | Indica si la reserva fue cancelada o no.                                      |
+
+### 1.2. OBJETIVO
+
+El objetivo de este análisis es desarrollar un modelo predictivo capaz de anticipar si un cliente honrará su reserva o la cancelará, utilizando datos históricos de reservas hoteleras.
+Esto permitirá a los hoteles mejorar su gestión de capacidad, reducir las pérdidas por cancelaciones y optimizar sus ingresos, ajustando sus estrategias de reserva en función de los comportamientos de los clientes.
+
+## 2. LIBRERIAS
+
+```{r}
+library(dplyr) 
+library(tidyverse)
+library(ggplot2)
+library(conflicted)
+conflicts_prefer(dplyr::filter)
+conflicts_prefer(dplyr::recode)
+conflicts_prefer(dplyr::rename)
+conflicts_prefer(gtsummary::select)
+library(VIM)#Visualizacion de valores perdidos
+library(DMwR)# Imputacion de datos
+library(missMDA)# Imputacion de datos
+library(arules)#Discretizacion
+library(reshape)# Estandarización
+library(mvoutlier)# Visualizacion de outlier multivariados
+library(caret)# Trasnformacion con el método boxo-cox
+library(randomForest)
+library(ggcorrplot)
+library(skimr)
+library(gridExtra)
+library(rpart)# Árboles..
+library(partykit)# Visualizacion
+library(neuralnet)
+library(gtsummary)
+library(mlbench)
+library(caTools)
+library(MASS)
+library(themis)
+library(OptimalCutpoints)
+library(tidymodels)
+library(class)
+library(e1071)         # Para SVM
+library(gbm)
+library(recipes) # Para transformar a dummy y escalar var numericas
+library(pROC)
+```
+
+## 3. LECTURA DE DATOS
+
+```{r}
+df <- read.csv("https://raw.githubusercontent.com/CaritoRamos/DataSets/refs/heads/main/Hotel%20Reservations.csv", sep=",") 
+head(df) 
+summary(df) #resumen estadístico de las variables en el dataframe
+```
+
+```{r}
+str(df)
+```
+
+## 4. DATA WRANGLING
+
+### 4.1. EXPLORACION DE LOS DATOS
+
+```{r}
+#Nombres de las columnas del df
+colnames(df)
+```
+
+```{r}
+#Exploramos recuento de valores de cada columna
+for (i in colnames(df)[-1]) {  # Omitimos la primera columna
+  print(paste("Table:", i))
+  print(table(df[[i]]))
+}
+```
+
+```{r}
+#Renombramos las columnas:
+df <- df %>% rename(,adults = "no_of_adults",
+          children = "no_of_children", 
+          weekend_nights = "no_of_weekend_nights", 
+          weekday_nights ="no_of_week_nights", 
+          meal_plan ="type_of_meal_plan", 
+          car_parking_required = "required_car_parking_space", 
+          room_type = "room_type_reserved", 
+          high_season = "arrival_month", 
+          market_segment = "market_segment_type", 
+          previous_cancellations = "no_of_previous_cancellations",
+          bookings_not_canceled = "no_of_previous_bookings_not_canceled",
+          avg_price_room = "avg_price_per_room", 
+          special_requests = "no_of_special_requests", 
+          target ="booking_status")
+```
+
+```{r}
+#Renombramos los valores de "room_type"
+df <- df %>%
+  mutate(room_type = recode(room_type,
+                                     "Room_Type 1" = "Type 1",
+                                     "Room_Type 2" = "Type 2",
+                                     "Room_Type 3" = "Type 3",
+                                     "Room_Type 4" = "Type 4",
+                                     "Room_Type 5" = "Type 5",
+                                     "Room_Type 6" = "Type 6",
+                                     "Room_Type 7" = "Type 7"))
+```
+
+De los resultados obtenidos previamente, se tiene que:
+
+-   La variable "repeated_guest" posee dos únicos valores por lo que, a pesar de ser numéricas se considerará como categórica, junto con las variables: "meal_plan", "room_type", "arrival_month", "segment", incluido el target.
+-   Por otro lado se observa que para un mejor análisis las variables: "children", "previous_cancellations", "special_requests"deben binarizarse.
+-   También se identifica la posibilidad de simplificar la variable "arrival_month" agrupando los datos en dos categorías: temporada alta y temporada baja.
+-   Finalmente, se observa que la variable "total_nights" debe binarizarse en función de estadías cortas o largas para un mejor análisis.
+
+### 4.2. TRATAMIENTO DE LOS DATOS
+
+#### DATOS FALTANTES
+
+```{r}
+#Verificamos datos faltantes:
+any(is.na(df))  # Verifica si hay algún dato faltante en todo el df
+sum(is.na(df))  # Cuenta cuántos datos faltan en total
+```
+
+```{r}
+#Para obtener una matriz que te indique en qué filas y columnas faltan datos:
+VIM::aggr(df, numbers = T)
+```
+
+#### VALORES INFINITOS
+
+```{r}
+inf_values <- sapply(df, function(x) sum(is.infinite(x)))
+inf_values
+```
+
+#### DUPLICADOS
+
+```{r}
+#Identificando duplicados
+num_duplicados <- sum(duplicated(df))
+num_duplicados
+```
+
+```{r}
+#Filas duplicadas
+duplicados <- df[duplicated(df), ]
+duplicados
+```
+
+### 4.3. TRANSFORMACION DE VARIABLES
+
+#### CREACION DE COLUMNAS
+
+```{r}
+#Creando columna "Total_guests"
+df <- df %>%
+  mutate(total_guests = adults + children)
+
+df %>%
+  select(adults, children, total_guests) %>%
+  head()
+```
+
+```{r}
+table(df$total_guests)
+```
+
+Para simplificar el análisis y facilitar la identificación de patrones de comportamiento específicos, se propone binarizar la variable "total_guests" en función de si hay un solo huésped o más de uno.
+
+```{r}
+#Creando la columna "Total_nights"
+df <- df %>%
+  mutate(total_nights = weekend_nights + weekday_nights)
+
+df %>%
+  select(weekend_nights, weekday_nights, total_nights) %>%
+  head()
+```
+
+```{r}
+table(df$total_nights)
+```
+
+Se propone binarizar la variable "total_nights" de manera similar a "total_guests", clasificando las reservas en "estancia corta" (tres noches o menos) y "estancia larga" (más de tres noches), basándose en la distribución de la variable.
+Esta binarización simplifica el análisis al enfocarse en dos categorías clave, facilitando la comprensión del comportamiento de los clientes en relación con la duración de su estancia.
+
+```{r}
+#Creando la columna "total_stay_price"
+df <- df %>%
+  mutate(total_stay_price = avg_price_room * total_nights)
+
+df %>%
+  select(avg_price_room, total_nights, total_stay_price) %>%
+  head()
+```
+
+#### ELIMINACION DE COLUMNAS
+
+-   Como primer paso, evaluaremos la relevancia de las variables verificando su sesgo y varianza. Las variables con baja varianza tienden a tener un menor poder explicativo o predictivo, ya que no logran distinguir adecuadamente entre los casos. Si los valores son muy similares entre sí, la variable aporta poco valor para separar o clasificar las observaciones. Además, en muchos análisis predictivos, las variables con baja varianza suelen eliminarse porque no añaden valor al modelo y, en algunos casos, pueden introducir ruido.
+
+```{r}
+#Identificando variables con baja varianza:
+low_variance_vars <- nearZeroVar(df, saveMetrics = TRUE)
+low_variance_cols <- rownames(low_variance_vars[low_variance_vars$nzv == TRUE, ])
+low_variance_cols
+```
+
+-   Luego de los resultados, consideramos que las variables "children", "previous_cancellations" y "repeated_guest" pueden influir significativamente sobre el target por lo que sería conveniente no eliminarlas aún.
+
+-   Finalmente eliminaremos las siguientes variables por considerarse irrelevantes para el presente análisis: "avg_price_room", "adults", "weekend_nights", "weekday_nights", "arrival_year", "car_parking_required" y "bookings_not_canceled".
+
+```{r}
+#Eliminando columnas irrelevantes
+df <- df %>% select(-Booking_ID, -weekend_nights,-weekday_nights,-adults, -arrival_year, -arrival_date, -bookings_not_canceled, -avg_price_room, -car_parking_required)
+```
+
+```{r}
+head(df)
+```
+
+#### BINARIZACION DE VARIABLES
+
+```{r}
+#Binarización del "target"
+df <- df %>%
+  mutate(target = recode(target,"Canceled" = 1,"Not_Canceled" = 0))
+```
+
+```{r}
+#Binarización de la variable "children"
+df$children <- ifelse(df$children == 0, 0, 1)
+head(df$children)
+tail(df$children)
+```
+
+```{r}
+#Binarización de la variable  "previous_cancellations"
+df$previous_cancellations <- ifelse(df$previous_cancellations == 0, 0, 1)
+head(df$previous_cancellations)
+tail(df$previous_cancellations)
+```
+
+```{r}
+#Binarización de la variable  "special_requests"
+df$special_requests <- ifelse(df$special_requests == 0, 0, 1)
+head(df$special_requests)
+tail(df$special_requests)
+```
+
+```{r}
+#Cambio de valores de la variable  "repeated_guest"
+df$repeated_guest <- ifelse(df$repeated_guest == 0, 0, 1)
+head(df$repeated_guest)
+tail(df$repeated_guest)
+```
+
+```{r}
+# Binarización de la variable "total_guests" y cambio de nombre
+df <- df %>% rename(,single_guest = "total_guests")
+
+df$single_guest <- ifelse(df$single_guest == 1, 1, 0)
+head(df$single_guest)
+tail(df$single_guest)
+```
+
+```{r}
+# Binarización de la variable "total_nights" y cambio de nombre
+df <- df %>% rename(,short_stay = "total_nights")
+
+df$short_stay <- ifelse(df$short_stay <= 3, 1, 0)
+head(df$short_stay)
+tail(df$short_stay)
+```
+
+```{r}
+#Binarización de la variable  "arrival_month"
+
+#Primero queremos saber qué meses son temporada alta considerando que si se iguala o supera la media entonces es temporada alta
+frequencies <- c(2736, 3813, 3021, 1704, 1014, 2920, 3203, 2358, 2598, 2980, 5317, 4611)
+months <- c(4,8,12,2,1,7,6,3,5,11,10,9)
+
+mean_frequency <- mean(frequencies)
+df_freq <- data.frame(month = months, frequency = frequencies)
+high_demand_months <- df_freq[df_freq$frequency >= mean_frequency, ] #Identificar los meses con alta demanda
+
+# Mostrar resultados
+mean_frequency
+high_demand_months
+```
+
+Los meses de febrero, ´junio, agosto, septiembre y octubre son temporada alta y el resto son temporada baja.
+
+```{r}
+df$high_season = ifelse(df$high_season %in% c(6, 8, 9, 10), 1, 0)
+
+head(df$high_season)
+tail(df$high_season)
+```
+
+```{r}
+head(df)
+```
+
+#### VARIABLES CATEGORICAS
+
+```{r}
+colnames(df)
+```
+
+```{r}
+#Variables categóricas
+cat_vars <- df %>%
+  select_if(~is.character(.)) %>%
+  colnames()
+
+cat_vars
+```
+
+#### TRANSFORMACION DE VARIABLES CATEGORICAS A FACTOR
+
+```{r}
+#Transformamos las variables categóricas a factor.
+for (i in cat_vars){
+  df[,i] <- factor(df[,i])
+}
+str(df)
+```
+
+Las variables "target"; "children", "repeated_guest", "previous_cancellations", "high_season", "single_guest", "short_stay" y "special_requests" son binomiales por lo que serán convertidas a factor.
+
+```{r}
+df$target <- as.factor(df$target)
+df$children <- as.factor(df$children)
+df$repeated_guest <- as.factor(df$repeated_guest)
+df$previous_cancellations <- as.factor(df$previous_cancellations)
+df$high_season <- as.factor(df$high_season)
+df$special_requests <- as.factor(df$special_requests)
+df$single_guest <- as.factor(df$single_guest)
+df$short_stay  <- as.factor(df$short_stay )
+
+str(df)
+```
+
+```{r}
+#Actualizamos las variables categóricas:
+#Variables categóricas
+cat_vars <- df %>%
+  select_if(~is.factor(.)) %>%
+  colnames()
+
+cat_vars
+```
+
+```{r}
+#Para conocer los levels que tiene cada variable categórica:
+for (i in cat_vars){
+  cat(i, ":", levels(df[[i]]), "\n")
+}
+```
+
+#### VARIABLES NUMERICAS
+
+```{r}
+#Variables numéricas
+num_vars <- df %>%
+  select_if(is.numeric) %>%
+  colnames()
+
+num_vars
+```
+
+### 4.4. TRATAMIENTO DE OUTLIERS
+
+```{r}
+#Visualización de la distribución de las variables numéricas
+for (i in num_vars) {
+  
+  box_plot <- df %>%
+    ggplot(aes(y = !!sym(i))) +
+    geom_boxplot(fill = "skyblue", color = "black") +
+    ggtitle(paste("Boxplot de", i)) +
+    theme_minimal()
+  
+  grid.arrange(box_plot, ncol = 1)
+  
+}
+```
+
+```{r}
+outliers <- c("total_stay_price", "lead_time")
+```
+
+```{r}
+df_outliers <- df[ , outliers]
+boxplot(df_outliers)
+```
+
+```{r}
+#Funcion para indicar la posicion de los valores atipicos
+OutlierR <- function(x){ 
+  out <- boxplot.stats(x)$out 
+  pos<-which(x%in%out) 
+  names(out)<-pos 
+  return(out) 
+}
+apply(df_outliers,2,OutlierR)
+
+```
+
+```{r}
+dfTrans <- DMwR::SoftMax(df_outliers,lambda = 2, avg = mean(x, na.rm = T), std = sd(x, na.rm = T)) 
+
+EstandRob <- reshape ::rescaler(df_outliers)
+
+op <- par(mfrow=c(1,2))
+boxplot(EstandRob, 
+        col = "#69BE28",
+        main = "Estandarización (Robust)") 
+
+boxplot(df_outliers,
+        col="#002C44",
+        main="SoftMax")
+```
+
+```{r}
+head(dfTrans)
+```
+
+```{r}
+df[,c("total_stay_price", "lead_time")] <- dfTrans[, c("total_stay_price", "lead_time")]
+head(df)
+str(df)
+```
+
+## 5. EDA
+
+### 5.1. ANALISIS UNIVARIADO
+
+#### 5.1.1. VARIABLES NUMÉRICAS
+
+```{r}
+# Visualización de histogramas para las variables numéricas
+for (i in num_vars) {
+  
+  hist_plot <- df %>%
+    ggplot(aes(x = !!sym(i))) +
+    geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+    ggtitle(paste("Histograma de", i)) +
+    theme_minimal()
+  
+  box_plot <- df %>%
+    ggplot(aes(x = !!sym(i))) +
+    geom_boxplot(fill = "skyblue", color = "black") +
+    ggtitle(paste("Boxplot de", i)) +
+    theme_minimal()
+  
+  grid.arrange(hist_plot, box_plot, ncol = 2)
+  
+}
+
+  
+```
+
+#### 5.1.2. VARIABLES CATEGÓRICAS
+
+```{r}
+# Tabla de frecuencia para cada variable categórica
+for (i in cat_vars) {
+  print(i)
+  print(table(df[[i]]))
+}
+```
+
+```{r}
+# Gráficos de barras para las variables categóricas
+for (i in cat_vars) {
+  print(ggplot(df, aes(x = !!sym(i))) +
+          geom_bar(fill = "lightblue", color = "black") +
+          ggtitle(paste("Bar Plot of", i)) +
+          theme_minimal())
+}
+```
+
+### 5.2. ANÁLISIS BIVARIADO
+
+Se realizará un análisis exhaustivo para identificar qué variables influyen significativamente en la variable objetivo (target), que indica si una reserva será cancelada o se hará efectiva, con el fin de mejorar la precisión del modelo predictivo.
+
+Se evaluarán variables categóricas y numéricas para identificar las relaciones más significativas entre el comportamiento del cliente y las reservas.
+Se plantean las siguientes hipótesis a verificar:
+
+-   La anticipación de la reserva,
+-   Historial de cancelaciones,
+-   Número de solicitudes especiales,
+-   Duración de la estadía,
+-   Segmento de mercado
+-   Si el cliente es recurrente o nuevo.
+
+#### 5.2.1. ANÁLISIS DE CORRELACIÓN (VARIABLES NUMÉRICAS)
+
+```{r}
+df_numeric <- df[, sapply(df, is.numeric)]
+```
+
+```{r}
+# Crear la matriz de correlación
+cor_matrix <- cor(df_numeric, use = "complete.obs")
+
+# Generar la matriz de correlación con anotaciones
+ggcorrplot(cor_matrix, lab = TRUE, # Mostrar los coeficientes de correlación
+           lab_size = 2, # Tamaño del texto
+           tl.cex = 10, # Tamaño de las etiquetas
+           colors = c("blue", "white", "red"), # Escala de colores
+           title = "Matriz de Correlación",
+           ggtheme = theme_minimal())
+```
+
+Se observa una correlación positiva fuerte (0.82) entre el precio total de la estadía (total_stay_price) y el total de noches reservadas.
+Esto sugiere que, a medida que aumenta el número de noches reservadas (total_nights), también tiende a aumentar el precio total de la estadía (total_stay_price).
+En ese sentido, es necesario investigar si esta relación se mantiene constante en diferentes segmentos de clientes o temporadas, o si se ve afectada por otras variables como el tipo de habitación, la época del año, etc.
+
+#### 5.2.2. ANALISIS CON GTSUMMARY
+
+```{r}
+table1 <- df|>
+  tbl_summary()
+table1
+```
+
+```{r}
+table2 <- tbl_summary(df, by = target)|> 
+add_n() |> # add column with total number of non-missing observations
+add_p() |>  # test for a difference between groups
+modify_header(label = "**Variable**") |> # update the column header
+bold_labels()
+table2
+```
+
+**Interpretación:**
+
+**Variables categóricas:**
+
+De acuerdo con los p_value obtenidos se puede concluir que hay evidencia estadística suficiente para afirmar que las variables children, "arrival_month", "repeated_guest " y "special_requests" ejercen un efecto significativo sobre el target.
+
+**Variables numéricas**
+
+1.  **lead_time:** Las personas que cancelaron sus reservas, reservaron con mucha más anticipación que las que no cancelaron sus reservas.
+
+2.  **total_stay_price:** Los precios de las estancias son significativamente más altos en el grupo de personas que cancelaron sus reservas.
+    Esto indica que quienes cancelaron tenían costos de estadía considerablemente mayores.
+
+3.  **total_guests:** El número de huéspedes es un factor que influye en la cancelación de reservas.
+    Especialmente, se observa que las reservas con más de 2 huéspedes tienen una ligera tendencia a estar asociadas con cancelaciones.
+
+**Nota**: Los cálculos estadísticos para las variables ***meal_plan*** y ***room_type*** no pudieron completarse debido a limitaciones en el espacio de trabajo del algoritmo que implementa la prueba exacta de Fisher (Fisher's Exact Test).
+Esta prueba es particularmente exigente en términos de memoria y recursos computacionales cuando se manejan tablas grandes o complejas.
+Dado que no fue posible obtener los resultados de significancia estadística para estas variables y no se logró ajustar adecuadamente los recursos requeridos, se ha decidido no incluirlas en el análisis predictivo para evitar posibles sesgos o interpretaciones incorrectas.
+
+Del mismo modo, se elimina la columna **"*market_segment"*** debido a su distribución desbalanceada, donde segmentos minoritarios como *Aviation* y *Complementary* tienen muy pocos datos.
+Esto afecta la relevancia predictiva de la variable y podría generar sesgos en el modelo.
+Los segmentos predominantes (*Online* y *Offline*) ya capturan la mayor parte de la variabilidad.
+
+```{r}
+# Eliminamos las columnas 'meal_plan' y 'room_type'
+df <- df %>% select(-meal_plan, -room_type, -market_segment)
+head(df)
+```
+
+## 6. PREDICTION
+
+### 6.1. MODELO ESTADISTICO: REGRESION LOGISTICA
+
+#### 6.1.1. SEPARACION DE LA DATA
+
+```{r}
+# Separación de la data en entrenamiento, validación y prueba
+library(rsample)
+
+set.seed(123)  # Fijar semilla para reproducibilidad
+
+# Paso 1: División inicial (70% entrenamiento, 30% test+validación)
+data_split <- initial_split(df, prop = 0.7, strata = target)
+train_data <- training(data_split)
+test_validation_data <- testing(data_split)
+
+# Paso 2: División del conjunto test+validación en 50% test y 50% validación
+validation_split <- initial_split(test_validation_data, prop = 0.5, strata = target)
+validation_data <- training(validation_split)
+test_data <- testing(validation_split)
+
+# Revisión de las primeras observaciones de cada conjunto
+head(train_data)
+head(validation_data)
+head(test_data)
+```
+
+#### 6.1.2. BALANCEO DE LOS DATOS DE ENTRENAMIENTO
+
+```{r}
+table(train_data$target)
+table(validation_data$target)
+```
+
+#### 6.1.3. ENTRENAMIENTO DE LOS DATOS
+
+```{r}
+#Entrenamiento y selección de los hiperparámetros del modelo de regresión logística
+glm_model <- glm(target ~ ., data = train_data, family = binomial())  
+#Resumen del modelo entrenado 
+summary(glm_model)
+```
+
+```{r}
+#Transformamos los coeficientes en odds ratio: 
+exp(cbind(OR = coef(glm_model), confint(glm_model)))
+```
+
+Interpretación de Odds Ratio:
+
+| Variable | OR  | 2.5 % | 97.5 % | Interpretación |
+|----------|-----|-------|--------|----------------|
+
+|                 |        |        |        |                                                                                                                                                            |
+|-------------------|-------|-------|------------|----------------------------|
+| **(Intercept)** | 0.0882 | 0.0776 | 0.1002 | El intercepto no tiene una interpretación directa, pero su valor implica que cuando todas las variables son cero, la odds de que ocurra el evento es baja. |
+
+|               |        |        |        |                                                                                                                                                |
+|-------------------|---------|---------|---------|----------------------------|
+| **children1** | 1.3385 | 1.1922 | 1.5019 | La presencia de un niño aumenta la probabilidad de que ocurra el evento (clase 1) en un 33.85% (1.3385 - 1) comparado con cuando no hay niños. |
+
+|               |         |         |         |                                                                                                                                          |
+|------------------|---------|---------|---------|----------------------------|
+| **lead_time** | 11.7030 | 10.7509 | 12.7444 | Por cada aumento de una unidad en el tiempo de anticipación (lead time), la probabilidad de que ocurra el evento aumenta en un 1070.30%. |
+
+|                  |        |        |        |                                                                                                                             |
+|------------------|---------|---------|---------|----------------------------|
+| **high_season1** | 0.9885 | 0.9288 | 1.0520 | Estar en alta temporada tiene un efecto ligeramente negativo (no significativo) en la probabilidad de que ocurra el evento. |
+
+|                     |            |            |            |                                                                                                                                               |
+|-------------------|---------|---------|---------|----------------------------|
+| **repeated_guest1** | 0.00000065 | 1.2726e-31 | 3.1419e-36 | La probabilidad de que un huésped repetido ocurra es extremadamente baja, indicando que este grupo es poco probable que contribuya al evento. |
+
+|                             |          |          |     |                                                                                                                                                      |
+|-------------------|---------|---------|---------|----------------------------|
+| **previous_cancellations1** | 346115.6 | 85.83185 | NA  | Cada cancelación previa aumenta significativamente la probabilidad del evento; un aumento en este factor lleva a una enorme probabilidad del evento. |
+
+|                       |        |        |        |                                                                                           |
+|-----------|-----------|-----------|-----------|----------------------------|
+| **special_requests1** | 0.2523 | 0.2360 | 0.2696 | Hacer solicitudes especiales reduce la probabilidad del evento en un 74.77% (1 - 0.2523). |
+
+|                   |        |        |        |                                                                                                  |
+|------------|------------|------------|------------|---------------------------|
+| **single_guest1** | 0.6289 | 0.5777 | 0.6844 | Ser un huésped soltero reduce la probabilidad de que ocurra el evento en un 37.11% (1 - 0.6289). |
+
+|                 |        |        |        |                                                                                                                      |
+|------------|------------|------------|------------|---------------------------|
+| **short_stay1** | 2.0598 | 1.8787 | 2.2589 | Una estancia corta aumenta la probabilidad del evento en un 105.98% (2.0598 - 1) comparado con estancias más largas. |
+
+|                      |        |        |        |                                                                                                                                    |
+|------------|------------|------------|------------|---------------------------|
+| **total_stay_price** | 4.6869 | 4.1138 | 5.3416 | Por cada unidad adicional de precio total de estancia, la probabilidad de que ocurra el evento aumenta en un 368.69% (4.6869 - 1). |
+
+#### 6.1.4. PREDICCION EN DATOS DE VALIDACION
+
+```{r}
+# Realizamos la predicción en los datos de validación 
+validation_glm <- predict(glm_model, newdata = validation_data, type="response")  
+# Convertimos las probabilidades en clases binarias (0 o 1) usando un umbral de 0.5
+prediction_val <- ifelse(validation_glm > 0.5, 1, 0)  
+
+# Asegurarse de que ambas variables sean factores y tengan los mismos niveles 
+prediction_val <- factor(prediction_val, levels = c(0, 1)) 
+validation_data$target <- factor(validation_data$target, levels = c(0, 1)) 
+
+# Evaluar el modelo 
+confusionMatrix(prediction_val, validation_data$target)
+```
+
+```{r}
+roc_curve <- roc(validation_data$target, validation_glm)
+plot(roc_curve)
+auc_value <- auc(roc_curve)
+print(auc_value)
+```
+
+```{r}
+roc_curve <- roc(validation_data$target, validation_glm)
+plot(roc_curve, col = "blue", main = "Curva ROC")
+abline(a = 0, b = 1, lty = 2, col = "red")  # Línea de referencia
+```
+
+#### 6.1.5. EVALUACION DEL MODELO CON LOS DATOS DE PRUEBA
+
+```{r}
+# Realizamos la predicción en los datos de prueba 
+y_pred_class <-  predict(glm_model,test_data, type="response")  
+
+# Convertimos las probabilidades en clases binarias (0 o 1) usando un umbral de 0.5
+prediction_test <- ifelse(y_pred_class > 0.5, 1, 0)  
+
+# Asegurarse de que ambas variables sean factores y tengan los mismos niveles
+prediction_test <- factor(prediction_test, levels = c(0, 1)) 
+test_data$target <- factor(test_data$target, levels = c(0, 1))  
+
+# Evaluar el modelo 
+confusionMatrix(prediction_test, test_data$target)
+```
+
+### 6.2. MODELOS NO ESTADISTICOS
+
+#### 6.2.1. PREPARACION DE LA DATA
+
+```{r}
+#Transformamos las variables del tipo factor en dummy y estandarizar las variables numéricas
+
+# Creamos  la receta para transformar las variables
+recipe_trans <- recipe(target ~ ., data = df) %>%
+  step_normalize(all_numeric()) %>%   # Estandarizar (normalizar) las variables numéricas
+  step_dummy(all_nominal(), -all_outcomes())# Convertimos variables categóricas a dummies
+
+# Preparamos la receta
+recipe_prep <- prep(recipe_trans)
+
+# Aplicamos la receta a los datos para transformarlos
+df_transformed <- bake(recipe_prep, new_data = df)
+
+# Ver las primeras filas del dataframe transformado
+head(df_transformed)
+```
+
+```{r}
+str(df_transformed)
+```
+
+```{r}
+#Guardar la receta o transformador de datos 
+saveRDS(recipe_prep, "transformador_receta.rds")
+
+#Cargar la receta guardada o transformador de datos
+loaded_recipe <- readRDS("transformador_receta.rds")
+
+```
+
+```{r}
+#Aplicar la receta en nuevos datos, en este caso lo estamos aplicando a la misma data para compropbar que me devuelve los mismos valores. Se puede aplicar a nueva data que tenga las mismas columnas del df. Posteriormente se puede aplicar al predict.
+nuevos_datos <- bake(loaded_recipe, new_data = df)
+head(nuevos_datos)
+```
+
+#### 6.2.2. SEPARACION DE LA DATA
+
+```{r}
+#Separación de la data de entrenamiento y prueba
+set.seed(123)  # Fijar semilla para reproducibilidad
+data_split <- initial_split(df_transformed, prop = 0.7, strata = target)
+
+train_data <- training(data_split)
+test_validation_data <- testing(data_split)
+
+# Separación adicional del conjunto de test+validación (50% test, 50% validación)
+validation_split <- initial_split(test_validation_data, prop = 0.5, strata = target)
+
+# Conjuntos de validación y test final
+validation_data <- training(validation_split)
+test_data <- testing(validation_split)
+
+# Revisar los primeros datos de cada conjunto
+head(train_data)
+head(validation_data)
+head(test_data)
+```
+
+#### 6.2.3. BALANCEO DE LOS DATOS DE ENTRENAMIENTO
+
+```{r}
+#Verificamos las dimensiones para ver el balanceo de la data
+dim(train_data)
+dim(validation_data)
+```
+
+```{r}
+#Balanceo de los datos
+recipe_bal <- recipe(target  ~ ., data = train_data) %>%
+  step_smote(target)
+```
+
+```{r}
+# Preparar la receta y aplicar a los datos
+prep_bal <- prep(recipe_bal)
+data_balanced <- bake(prep_bal, new_data = NULL)
+
+# Verificar el balance de clases
+table(data_balanced$target)
+```
+
+#### 6.2.4. ENTRENAMIENTO DE LOS DATOS
+
+```{r}
+# Cross Validation. Definimos el método de control de entrenamiento
+control <- trainControl(method="cv", number=5)  # k-fold cross-validation
+performance_metric <- "Accuracy"  # Definimos la métrica para medir el error
+```
+
+```{r}
+#Aplicamos todos los modelos que se quieran:
+# Modelo LDA
+lda.Db <- train(target~., data=train_data, method="lda", 
+                metric=performance_metric, trControl=control,preProcess=NULL,
+                prob.model = TRUE)
+
+
+mlp.Db <- train(target~., data=train_data, method="mlp", 
+                metric=performance_metric, trControl=control,preProcess=NULL,
+                prob.model = TRUE)
+
+# Modelo SVM Support Vector Machines 
+svm.Db <- train(target~., data=train_data, method="svmRadial", 
+                metric=performance_metric, trControl=control,preProcess=NULL,
+                prob.model = TRUE)
+
+# Modelo Random Forest
+rf.Db <- train(target~., data=train_data, method="rf", 
+               metric=performance_metric, trControl=control,preProcess=NULL,
+               prob.model = TRUE)
+
+# Modelo XGboost 
+#xgboost#eta control the learning rate
+xg<- train(target~., data=train_data, method="xgbLinear",
+           metric=performance_metric, trControl=control,preProcess=NULL)
+
+# Modelo Classification and Regression Trees (CART) 
+cart.Db <- train(target~., data=train_data, method="rpart", 
+                 metric=performance_metric, trControl=control, preProcess=NULL)
+
+
+# Modelo Gradient Boosting (gbm)
+#shrinkage : learning rate
+gbm1<- train(target~., data=train_data, method="gbm",
+             metric=performance_metric, trControl=control,preProcess=NULL)
+
+
+# Modelo de Red Neuronal (neural network)
+net<- train(target~., data=train_data, method="nnet",
+            metric=performance_metric, trControl=control,preProcess=NULL,
+            prob.model = TRUE)
+
+
+# Modelo k-NN
+k_nn<- train(target~., data=train_data, method="kknn",
+             metric=performance_metric, trControl=control,preProcess=NULL)
+```
+
+```{r}
+#Resumen de los resultados
+results.Db <- resamples(list(lda=lda.Db,mlp= mlp.Db,knn=k_nn ,
+                             cart=cart.Db,extremeGB=xg, 
+                             gbm=gbm1,neuron = net, svm=svm.Db, 
+                             rf=rf.Db, xgb=xg))
+df1 <- summary(results.Db)
+dotplot(results.Db)
+```
+
+#### 6.2.5. PREDICCIONES EN LOS DATOS DE VALIDACION
+
+```{r}
+# Realizamos la predicción en los datos de validación
+validation_predictions <- predict(rf.Db, newdata = validation_data, type="raw")
+
+confusionMatrix(data = validation_predictions, 
+                reference = validation_data$target, 
+                mode="everything")
+```
+
+#### 6.2.6. EVALUACION DEL MODELO CON LOS DATOS DE PRUEBA
+
+```{r}
+# Realizamos la predicción en los datos de prueba
+y_pred_class <-  predict(rf.Db,test_data, type="raw")
+y_pred_prob <-  predict(rf.Db,test_data, type="prob")
+
+confusionMatrix(data = y_pred_class, 
+                reference = test_data$target, 
+                mode="everything")
+
+```
+
+**Insights:**
+
+Analizamos las métricas para ambas predicciones y se tiene que:
+
+**1.** **Accuracy (Exactitud)**:
+
+-   **Validation Accuracy**: 0.8544 (85.44%)
+
+-   **Test Accuracy**: 0.8523 (85.23%)
+
+Esto indica que en ambos conjuntos de datos, elmodelo clasificó correctamente alrededor del 85% de las instancias.
+La exactitud es bastante alta y similar en ambos casos, lo que sugiere que el modelo generaliza bien, es decir, no está sobreajustado a los datos de entrenamiento.
+
+2\.
+**Kappa**:
+
+-   **Validation Kappa**: 0.6573
+
+-   **Test Kappa**: 0.6472
+
+El estadístico Kappa mide el acuerdo entre la predicción del modelo y las etiquetas reales, ajustando por el azar.
+Valores de Kappa entre 0.6 y 0.8 indican un acuerdo sustancial.
+En este caso, los valores están alrededor de 0.65, lo que significa que el rendimiento del modelo es sólido y mejor que el azar, pero aún hay margen para mejora.
+
+3\.
+**Sensitivity (Verdaderos positivos '0')**:
+
+-   **Validation Sensitivity**: 0.9259 (92.59%)
+
+-   **Test Sensitivity**: 0.9371 (93.71%)
+
+La sensibilidad mide qué tan bien el modelo identifica correctamente los verdaderos positivos.
+En ambos conjuntos de datos, la sensibilidad es alta, lo que significa que el modelo identifica correctamente la mayoría de los casos donde no se canceló la reserva.
+
+4\.
+**Specificity (Verdaderos negativos '1')**:
+
+-   **Validation Specificity**: 0.7078 (70.78%)
+
+-   **Test Specificity**: 0.6781 (67.81%)
+
+La especificidad mide qué tan bien el modelo identifica correctamente los verdaderos negativos.
+En este caso, la especificidad es algo más baja que la sensibilidad, lo que significa que el modelo tiene más dificultades para identificar correctamente los casos donde se canceló la reserva.
+
+5\.
+**Precision (Precisión)**:
+
+-   **Validation Precision**: 0.8667 (86.67%)
+
+-   **Test Precision**: 0.8566 (85.66%)
+
+La precisión mide la proporción de verdaderos positivos entre todas las predicciones positivas .
+Una precisión alta indica que cuando el modelo predice que la reserva no se cancelará, lo hace de manera confiable.
+
+6\.
+**Balanced Accuracy (Exactitud balanceada)**:
+
+-   **Validation Balanced Accuracy**: 0.8169 (81.69%)
+
+-   **Test Balanced Accuracy**: 0.8076 (80.76%)
+
+La exactitud balanceada es el promedio entre sensibilidad y especificidad, y es útil cuando las clases están desbalanceadas.
+Tus valores de exactitud balanceada son altos, lo que significa que el modelo está haciendo un buen trabajo para ambas clases, aunque el rendimiento para la clase '0' podría mejorar un poco.
+
+De acuerdo con los resultados el modelo de **Random Forest** ha mostrado un buen rendimiento en el conjunto de datos de prueba.
+
+#### 6.2.7. CURVA ROC
+
+Real vs Predicción
+
+```{r}
+# Obtener las probabilidades predichas
+y_pred_prob <- predict(rf.Db, test_data, type = "prob")[, 2]
+
+# Calcular la curva ROC
+roc_curve <- roc(test_data$target, y_pred_prob)
+
+#Area bajo la curva
+auc_value <- auc(roc_curve)
+print(auc_value)
+
+# Graficar la curva ROC
+plot(roc_curve, col = "blue", main = "ROC Curve")
+```
+
+### 6.4. PREDICCION EN DATOS NUEVOS
+
+```{r}
+new_data <- tibble(
+  lead_time = c(14, 60, 3, 30, 90), # Tiempo en días entre la reserva y la llegada
+  single_guest = c(1, 0, 1, 0, 0), # Número total de huéspedes
+  short_stay = c(1, 0, 1, 0, 0), # Número total de noches de la estadía
+  total_stay_price = c(300, 1000, 150, 750, 400), # Precio total de la estadía
+  children = c(0, 1, 0, 1, 1), # Indicador si hay niños (1 = sí, 0 = no)
+  high_season = c(1, 0, 1, 1, 0), # Indicador de temporada alta (1 = sí, 0 = no)
+  repeated_guest = c(0, 1, 0, 0, 0), # Indicador si es un huésped repetido (1 = sí, 0 = no)
+  previous_cancellations = c(0, 0, 0, 1, 1), # Número de cancelaciones anteriores
+  special_requests = c(0, 1, 0, 1, 1) # Número de solicitudes especiales realizadas
+)
+
+# Transformar columnas a tipo factor
+new_data <- new_data %>%
+  mutate(
+    children = as.factor(children),
+    high_season = as.factor(high_season),
+    repeated_guest = as.factor(repeated_guest),
+    previous_cancellations = as.factor(previous_cancellations),
+    single_guest = as.factor(single_guest),
+    short_stay = as.factor(short_stay),
+    special_requests = as.factor(special_requests)
+  )
+# Ver las primeras filas de los datos generados
+print(new_data)
+```
+
+```{r}
+loaded_recipe <- readRDS("transformador_receta.rds")
+```
+
+```{r}
+# Transformar los nuevos datos utilizando la receta
+new_data_transformed <- bake(loaded_recipe, new_data = new_data)
+
+# Realizar predicciones utilizando tu modelo entrenado
+predictions <- predict(rf.Db, new_data_transformed)
+
+# Ver las predicciones
+print(predictions)
+```
+
+Conclusión:
+
+La predicción obtenida indica que, para los cinco nuevos datos introducidos, el modelo prevé que todas las reservas serán canceladas.
+Este resultado es notable, especialmente dado que el modelo ha mostrado un rendimiento robusto durante la fase de entrenamiento y validación, con una precisión general del 85% y una sensibilidad del 92.5%.
